@@ -42,11 +42,14 @@ La ruta `GET /health` responde el estado basico usado por el hosting.
 
 - Al caer en un lugar disponible, el jugador decide si comprarlo o pasar.
 - Los lugares comprados aparecen en **Mis lugares** y pueden hipotecarse para recuperar fondos.
+- El panel de jugadores muestra fortuna disponible y patrimonio total aproximado.
 - Una propiedad hipotecada no cobra renta hasta pagar su recuperacion.
+- Si una deuda deja el saldo en cero o negativo, el jugador puede hipotecar sus lugares antes de quedar fuera.
 - Al pasar por Salida se reciben 200 Lps. ficticios.
 - El presidio hace perder un turno.
 - Las tragedias se muestran solamente al jugador afectado; la mesa recibe el resultado.
-- Incluye 20 cartas de tragedia y 20 cartas de chisme originales elegidas al azar.
+- Incluye 20 cartas de premio, 20 de tragedia y 20 de chisme originales elegidas al azar.
+- Los premios pueden entregar ingresos como loteria, ventas, rifas o bonos.
 - Si un jugador queda con `L 0`, pierde sus lugares y sale de la partida.
 
 ## Publicar En Render

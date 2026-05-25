@@ -65,6 +65,28 @@ const eventCards = {
     { text: 'La conexion de internet fallo antes de una entrega: pagaste 105 Lps.', amount: 105 },
     { text: 'Se extravio un paquete importante: pagaste 135 Lps.', amount: 135 },
     { text: 'Un cobro bancario inesperado redujo tu saldo: pagaste 120 Lps.', amount: 120 }
+  ],
+  premio: [
+    { text: 'Ganaste la loteria del barrio: recibiste 300 Lps.', amount: 300 },
+    { text: 'Tu emprendimiento tuvo un excelente fin de semana: recibiste 180 Lps.', amount: 180 },
+    { text: 'Ganaste un sorteo de la feria: recibiste 150 Lps.', amount: 150 },
+    { text: 'Te devolvieron un deposito pendiente: recibiste 120 Lps.', amount: 120 },
+    { text: 'Vendiste una artesania en el bazar: recibiste 100 Lps.', amount: 100 },
+    { text: 'Cobraste un trabajo extra: recibiste 160 Lps.', amount: 160 },
+    { text: 'Recibiste un reembolso inesperado: recibiste 90 Lps.', amount: 90 },
+    { text: 'Tu pulperia tuvo buenas ventas: recibiste 140 Lps.', amount: 140 },
+    { text: 'Ganaste un concurso comunitario: recibiste 200 Lps.', amount: 200 },
+    { text: 'Una inversion pequena rindio frutos: recibiste 175 Lps.', amount: 175 },
+    { text: 'Te pagaron una deuda antigua: recibiste 130 Lps.', amount: 130 },
+    { text: 'Vendiste entradas para una actividad escolar: recibiste 110 Lps.', amount: 110 },
+    { text: 'Ganaste un torneo local: recibiste 220 Lps.', amount: 220 },
+    { text: 'Encontraste una oportunidad de negocio: recibiste 190 Lps.', amount: 190 },
+    { text: 'Tu cosecha salio mejor de lo esperado: recibiste 210 Lps.', amount: 210 },
+    { text: 'Recibiste un bono por puntualidad: recibiste 95 Lps.', amount: 95 },
+    { text: 'Alquilaste tu espacio para un evento: recibiste 170 Lps.', amount: 170 },
+    { text: 'Vendiste comida en un partido: recibiste 125 Lps.', amount: 125 },
+    { text: 'Ganaste una rifa solidaria: recibiste 250 Lps.', amount: 250 },
+    { text: 'Tu proyecto recibio apoyo comunitario: recibiste 155 Lps.', amount: 155 }
   ]
 };
 
@@ -86,7 +108,7 @@ function createBoard() {
   return [
     { name: 'Salida', type: 'start', owner: null },
     property('Barrio Rio de Piedras', 120, 30, '#8e44ad'),
-    event('Chisme del barrio', 'chisme'),
+    event('Premio de la feria', 'premio'),
     property('Colonia Trejo', 140, 35, '#8e44ad'),
     property('Los Andes', 160, 40, '#2980b9'),
     event('Tragedia en la ruta', 'tragedia'),
@@ -104,7 +126,7 @@ function createBoard() {
     property('El Sauce', 280, 80, '#f39c12'),
     event('Tragedia vehicular', 'tragedia'),
     property('Mall Galerias', 300, 85, '#c0392b'),
-    { name: 'Descanso', type: 'rest', owner: null },
+    event('Premio emprendedor', 'premio'),
     property('Las Palmas', 310, 90, '#c0392b'),
     event('Chisme familiar', 'chisme'),
     property('La Puerta', 320, 95, '#c0392b'),
@@ -114,7 +136,7 @@ function createBoard() {
     property('Boulevard del Norte', 350, 110, '#d35400'),
     event('Chisme en redes', 'chisme'),
     property('Zona Industrial', 360, 115, '#27ae60'),
-    { name: 'Visita al Presidio', type: 'rest', owner: null },
+    event('Premio comunitario', 'premio'),
     property('El Carmen', 380, 120, '#27ae60'),
     event('Tragedia bancaria', 'tragedia'),
     property('Monte Maria', 400, 125, '#27ae60'),
@@ -190,8 +212,17 @@ function releaseProperties(roomState, player) {
   player.properties = [];
 }
 
-function eliminateIfBankrupt(roomState, player, reason) {
-  if (player.money > 0) return false;
+function mortgageValue(space) {
+  return Math.floor(space.cost / 2);
+}
+
+function availableMortgageValue(roomState, player) {
+  return roomState.board
+    .filter((space) => space.owner === player.id && !space.mortgaged)
+    .reduce((total, space) => total + mortgageValue(space), 0);
+}
+
+function eliminatePlayer(roomState, player, reason) {
   const index = roomState.players.findIndex((candidate) => candidate.id === player.id);
   if (index === -1) return false;
 
@@ -217,6 +248,34 @@ function eliminateIfBankrupt(roomState, player, reason) {
   return true;
 }
 
+function settleOrRequestRescue(roomState, player, reason) {
+  if (player.money > 0) return false;
+  const rescueFunds = availableMortgageValue(roomState, player);
+  if (player.money + rescueFunds <= 0) {
+    return eliminatePlayer(roomState, player, reason);
+  }
+
+  clearPendingAction(roomState);
+  roomState.pendingAction = { type: 'debt', playerId: player.id, reason };
+  io.to(player.id).emit('debtWarning', {
+    balance: player.money,
+    mortgageValue: rescueFunds,
+    needed: Math.abs(player.money) + 1,
+    reason
+  });
+  io.to(roomState.id).emit('chatMessage', {
+    author: 'Banco',
+    text: `${player.name} tiene una cuenta pendiente y debe hipotecar para continuar.`
+  });
+  emitState(roomState);
+  actionTimers[roomState.id] = setTimeout(() => {
+    if (roomState.pendingAction?.type === 'debt' && roomState.pendingAction.playerId === player.id) {
+      eliminatePlayer(roomState, player, 'No resolvio su deuda a tiempo.');
+    }
+  }, DECISION_TIMEOUT * 3);
+  return true;
+}
+
 function finishTurn(roomState, message) {
   clearPendingAction(roomState);
   if (!roomState.players.length) return;
@@ -227,7 +286,7 @@ function finishTurn(roomState, message) {
 
 function resolveTurnPayment(roomState, player, message, bankruptcyReason) {
   io.to(roomState.id).emit('chatMessage', { author: 'Juego', text: message });
-  if (!eliminateIfBankrupt(roomState, player, bankruptcyReason)) {
+  if (!settleOrRequestRescue(roomState, player, bankruptcyReason)) {
     clearPendingAction(roomState);
     roomState.currentTurnIndex = (roomState.currentTurnIndex + 1) % roomState.players.length;
     emitState(roomState);
@@ -428,8 +487,16 @@ io.on('connection', (socket) => {
         roomState,
         player,
         `${actionText}La tragedia le toco a ${player.name}: ${text}`,
-        'Una tragedia lo dejo sin fondos.'
+        `La tragedia (${text}) lo dejo sin fondos.`
       );
+      return;
+    }
+
+    if (space.eventType === 'premio') {
+      const card = eventCards.premio[Math.floor(Math.random() * eventCards.premio.length)];
+      player.money += card.amount;
+      socket.emit('cardDrawn', { title: `Premio para ${player.name}`, text: card.text });
+      finishTurn(roomState, `${actionText}La suerte favorecio a ${player.name}: ${card.text}`);
       return;
     }
 
@@ -447,7 +514,7 @@ io.on('connection', (socket) => {
       if (roomState.pendingAction?.playerId !== player.id) return;
       socket.off('chismeAction', handleChisme);
       io.to(roomState.id).emit('chatMessage', { author: 'Juego', text: `${actionText}${text}` });
-      if (!eliminateIfBankrupt(roomState, player, 'Un chisme lo dejo sin fondos.')) {
+      if (!settleOrRequestRescue(roomState, player, 'Un chisme lo dejo sin fondos.')) {
         clearPendingAction(roomState);
         roomState.currentTurnIndex = (roomState.currentTurnIndex + 1) % roomState.players.length;
         emitState(roomState);
@@ -511,6 +578,10 @@ io.on('connection', (socket) => {
     if (!roomState || !player || !space || !roomState.gameStarted) return;
 
     if (space.mortgaged) {
+      if (roomState.pendingAction?.type === 'debt' && roomState.pendingAction.playerId === player.id) {
+        socket.emit('actionFeedback', 'Primero cubri tu deuda hipotecando otra propiedad disponible.');
+        return;
+      }
       const repayment = Math.ceil(space.cost * 0.55);
       if (player.money <= repayment) {
         socket.emit('actionFeedback', `Necesitas mas de ${repayment} Lps. para levantar la hipoteca sin quebrar.`);
@@ -523,7 +594,7 @@ io.on('connection', (socket) => {
         text: `${player.name} recupero ${space.name} por ${repayment} Lps.`
       });
     } else {
-      const loan = Math.floor(space.cost / 2);
+      const loan = mortgageValue(space);
       player.money += loan;
       space.mortgaged = true;
       io.to(roomState.id).emit('chatMessage', {
@@ -531,7 +602,22 @@ io.on('connection', (socket) => {
         text: `${player.name} hipoteco ${space.name} y recibio ${loan} Lps.`
       });
     }
+    if (roomState.pendingAction?.type === 'debt' && roomState.pendingAction.playerId === player.id && player.money > 0) {
+      clearPendingAction(roomState);
+      io.to(roomState.id).emit('chatMessage', {
+        author: 'Banco',
+        text: `${player.name} cubrio su deuda y sigue en la partida.`
+      });
+      roomState.currentTurnIndex = (roomState.currentTurnIndex + 1) % roomState.players.length;
+    }
     emitState(roomState);
+  });
+
+  socket.on('declareBankruptcy', () => {
+    const roomState = rooms[socket.data.roomId];
+    const player = roomState?.players.find((candidate) => candidate.id === socket.id);
+    if (!roomState || !player || roomState.pendingAction?.type !== 'debt' || roomState.pendingAction.playerId !== player.id) return;
+    eliminatePlayer(roomState, player, 'Se declaro en quiebra.');
   });
 
   socket.on('disconnect', () => {

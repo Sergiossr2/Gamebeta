@@ -50,6 +50,13 @@ function formatLempiras(value) {
   return `L ${new Intl.NumberFormat('es-HN').format(value)}`;
 }
 
+function calculatePatrimony(state, player) {
+  const equity = state.board
+    .filter((space) => space.owner === player.id)
+    .reduce((total, space) => total + (space.mortgaged ? Math.floor(space.cost / 2) : space.cost), 0);
+  return player.money + equity;
+}
+
 function renderGameState(state, options = {}) {
   latestState = state;
   renderPlayers(state);
@@ -186,7 +193,9 @@ function updateControls(state) {
   const enoughPlayers = state.players.length >= 2;
 
   if (state.pendingAction && current) {
-    turnInfo.textContent = `Turno: ${current.name} - esperando decisión`;
+    turnInfo.textContent = state.pendingAction.type === 'debt'
+      ? `Turno: ${current.name} - cuenta pendiente`
+      : `Turno: ${current.name} - esperando decisión`;
   } else {
     turnInfo.textContent = current ? `Turno: ${current.name}` : 'Esperando jugadores...';
   }
@@ -399,6 +408,27 @@ socket.on('actionFeedback', (message) => {
   });
 });
 
+socket.on('debtWarning', ({ balance, mortgageValue, needed, reason }) => {
+  activeDecision = 'debt';
+  renderModalCard({
+    title: 'Cuenta pendiente',
+    text: `${reason} Tu saldo es ${formatLempiras(balance)}. Hipotecá propiedades por al menos ${formatLempiras(needed)} para continuar. Disponible en hipotecas: ${formatLempiras(mortgageValue)}.`,
+    options: [
+      {
+        label: 'Ir a Mis lugares',
+        onClick: completeDecision
+      },
+      {
+        label: 'Declararme en quiebra',
+        onClick: () => {
+          socket.emit('declareBankruptcy');
+          completeDecision();
+        }
+      }
+    ]
+  });
+});
+
 socket.on('eliminated', ({ reason }) => {
   completeDecision();
   renderModalCard({
@@ -416,6 +446,7 @@ function renderPlayers(state) {
     card.innerHTML = `
       <div style="display:flex;align-items:center;"><img src="${escapeHtml(player.avatar || 'assets/avatar1.svg')}" class="player-avatar" alt="avatar"> <strong>${escapeHtml(player.name)}</strong></div>
       <div class="money">Fortuna: ${formatLempiras(player.money)}</div>
+      <div>Patrimonio: ${formatLempiras(calculatePatrimony(state, player))}</div>
       <div>Posición: ${player.position}</div>
       <div>Propiedades: ${escapeHtml(player.properties.join(', ') || 'Ninguna')}</div>
     `;
@@ -437,6 +468,13 @@ function renderPortfolio(state) {
     return;
   }
 
+  if (state.pendingAction?.type === 'debt' && state.pendingAction.playerId === playerId) {
+    const warning = document.createElement('div');
+    warning.className = 'debt-banner';
+    warning.textContent = 'Tenés una deuda pendiente: hipotecá propiedades para seguir jugando.';
+    portfolio.appendChild(warning);
+  }
+
   properties.forEach((space) => {
     const item = document.createElement('div');
     item.className = `portfolio-item${space.mortgaged ? ' mortgaged' : ''}`;
@@ -448,7 +486,8 @@ function renderPortfolio(state) {
     `;
     const button = document.createElement('button');
     button.type = 'button';
-    button.disabled = !state.gameStarted;
+    const resolvingDebt = state.pendingAction?.type === 'debt' && state.pendingAction.playerId === playerId;
+    button.disabled = !state.gameStarted || (resolvingDebt && space.mortgaged);
     button.textContent = space.mortgaged
       ? `Recuperar ${formatLempiras(Math.ceil(space.cost * 0.55))}`
       : `Hipotecar ${formatLempiras(Math.floor(space.cost / 2))}`;
@@ -527,7 +566,7 @@ function renderBoard(state) {
       if (space.mortgaged) cell.classList.add('mortgaged');
       cell.innerHTML = `
         <div class="title">${boardIdx}. ${escapeHtml(space.name)}</div>
-        ${space.type === 'property' ? `<div class="space-price">${formatLempiras(space.cost)}</div><div class="space-rent">${space.mortgaged ? 'HIPOTECADA' : `Renta ${formatLempiras(space.rent)}`}</div><div class="space-owner">${escapeHtml(owner?.name || 'Disponible')}</div>` : `<div class="space-event">${space.eventType === 'chisme' ? 'Chisme' : space.eventType === 'tragedia' ? 'Tragedia' : escapeHtml(space.name)}</div>`}
+        ${space.type === 'property' ? `<div class="space-price">${formatLempiras(space.cost)}</div><div class="space-rent">${space.mortgaged ? 'HIPOTECADA' : `Renta ${formatLempiras(space.rent)}`}</div><div class="space-owner">${escapeHtml(owner?.name || 'Disponible')}</div>` : `<div class="space-event">${space.eventType === 'chisme' ? 'Chisme' : space.eventType === 'tragedia' ? 'Tragedia' : space.eventType === 'premio' ? 'Premio' : escapeHtml(space.name)}</div>`}
       `;
 
       if (space.color) {
@@ -538,7 +577,7 @@ function renderBoard(state) {
       } else if (space.type === 'event') {
         const band = document.createElement('div');
         band.className = 'color-band';
-        band.style.background = space.eventType === 'chisme' ? '#9b59b6' : '#95a5a6';
+        band.style.background = space.eventType === 'chisme' ? '#9b59b6' : space.eventType === 'premio' ? '#f3c858' : '#95a5a6';
         cell.appendChild(band);
       }
 

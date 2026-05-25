@@ -530,6 +530,17 @@ button:disabled {
   background: rgba(243, 200, 88, 0.08);
 }
 
+.debt-banner {
+  margin-bottom: 10px;
+  padding: 10px;
+  border: 1px solid rgba(238, 98, 82, 0.35);
+  border-radius: 11px;
+  background: rgba(238, 98, 82, 0.12);
+  color: #ffd1cb;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
 .board-container {
   display: flex;
   justify-content: center;
