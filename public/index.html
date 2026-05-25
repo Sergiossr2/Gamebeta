@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#1177cb" />
+  <title>Catrachópolis | Tablero hondureño</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main>
+    <section class="panel lobby-panel" id="lobby">
+      <header class="brand-hero">
+        <div class="flag-mark" aria-hidden="true">
+          <div class="flag-stars">★ ★<br>★<br>★ ★</div>
+        </div>
+        <div>
+          <p class="eyebrow">El juego inmobiliario catracho</p>
+          <h1>Catrachópolis</h1>
+          <p class="hero-copy">Aprendé a administrar un presupuesto ficticio mientras recorrés barrios y situaciones inspiradas en San Pedro Sula.</p>
+        </div>
+      </header>
+
+      <aside class="education-notice" aria-label="Aviso del proyecto">
+        <strong>Proyecto educativo y gratuito</strong>
+        <span>Sin compras, sin cobros y sin fines comerciales. Juego original independiente, no afiliado ni respaldado por marcas comerciales de juegos de mesa.</span>
+      </aside>
+
+      <div class="feature-row" aria-label="Características de la partida">
+        <div><strong>Lempiras ficticios</strong><span>Practicá decisiones financieras</span></div>
+        <div><strong>2-4 jugadores</strong><span>Partidas en línea</span></div>
+        <div><strong>30 minutos</strong><span>Gana la fortuna mayor</span></div>
+      </div>
+
+      <div class="lobby-layout">
+        <div class="setup-card">
+          <h2>Prepará tu partida</h2>
+          <label>
+            Tu nombre
+            <input id="playerName" type="text" placeholder="Ej: María" value="Jugador" />
+          </label>
+          <label>
+            Sala
+            <div class="room-controls">
+              <div class="mode-toggle">
+                <button type="button" id="createModeBtn" class="mode active">Crear sala</button>
+                <button type="button" id="joinModeBtn" class="mode">Unirse</button>
+              </div>
+              <input id="roomName" type="text" placeholder="Ej: Sala Las Palmas" value="Sala 1" />
+            </div>
+          </label>
+          <label>
+            Elegí tu ficha
+            <div class="avatar-choices">
+              <label><input type="radio" name="avatar" value="assets/avatar1.svg" checked><img src="assets/avatar1.svg" class="avatar-choice" alt="Ficha azul"></label>
+              <label><input type="radio" name="avatar" value="assets/avatar2.svg"><img src="assets/avatar2.svg" class="avatar-choice" alt="Ficha verde"></label>
+              <label><input type="radio" name="avatar" value="assets/avatar3.svg"><img src="assets/avatar3.svg" class="avatar-choice" alt="Ficha naranja"></label>
+              <label><input type="radio" name="avatar" value="assets/avatar4.svg"><img src="assets/avatar4.svg" class="avatar-choice" alt="Ficha morada"></label>
+            </div>
+          </label>
+          <button id="joinBtn" class="primary-action">Entrar a la partida</button>
+          <div class="lobby-footer">
+            <span class="status-chip">En vivo: Honduras</span>
+            <div id="joinFeedback" class="feedback hidden"></div>
+          </div>
+        </div>
+
+        <div class="lobby-side">
+          <div class="players-list" id="lobbyPlayers">
+            <h2>Jugadores en la sala</h2>
+            <div class="player-list-items">
+              <div class="empty">Esperando jugadores...</div>
+            </div>
+          </div>
+          <div class="room-list" id="roomList">
+            <h2>Salas disponibles</h2>
+            <div class="room-list-items">
+              <div class="empty">No hay salas activas. Creá una sala para iniciar.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel game-panel hidden" id="gameRoom">
+      <div class="game-header">
+        <div class="room-summary">
+          <p class="eyebrow">Catrachópolis</p>
+          <h2>Tu partida</h2>
+          <p class="room-meta">Simulación educativa gratuita: movete por SPS y cuidá tus lempiras ficticios.</p>
+          <span id="currentRoomLabel" class="status-chip"></span>
+        </div>
+        <div class="game-actions">
+          <button id="startBtn">Iniciar juego</button>
+          <button id="rollBtn">Lanzar dado</button>
+        </div>
+      </div>
+      <div class="game-status">
+        <span id="turnInfo" class="turn-pill">Esperando jugadores...</span>
+        <span class="timer-label">Tiempo restante <strong id="timer">00:00</strong></span>
+      </div>
+      <div class="top-row">
+        <div class="players" id="playersList"></div>
+        <div class="board-container">
+          <div class="board-grid" id="boardGrid"></div>
+        </div>
+      </div>
+      <div class="dice-area">
+        <span class="dice-label">Tu lanzamiento</span>
+        <div id="dice" class="dice">
+          <div class="face" id="diceFace">—</div>
+        </div>
+      </div>
+      <div class="chat-box">
+        <h2>La pulpería</h2>
+        <div class="messages" id="messages"></div>
+        <div class="chat-input">
+          <input id="chatText" type="text" placeholder="Contá algo a la mesa..." maxlength="250" />
+          <button id="sendBtn">Enviar</button>
+        </div>
+      </div>
+      <p class="legal-note">Uso educativo y no comercial. Catrachópolis es un proyecto independiente sin afiliación con marcas comerciales de juegos de mesa.</p>
+    </section>
+  </main>
+
+  <div class="modal hidden" id="cardModal">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 id="modalTitle">Carta</h2>
+      </div>
+      <div class="modal-body">
+        <p id="modalText"></p>
+        <div id="modalOptions" class="modal-options"></div>
+      </div>
+      <div class="modal-footer">
+        <button id="modalClose">Cerrar</button>
+      </div>
+    </div>
+  </div>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="client.js"></script>
+</body>
+</html>
