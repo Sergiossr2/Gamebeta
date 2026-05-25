@@ -12,6 +12,7 @@ const GAME_DURATION = 30 * 60 * 1000;
 const STARTING_MONEY = 1000;
 const SALIDA_BONUS = 200;
 const DECISION_TIMEOUT = 20000;
+const MAX_HOUSES = 4;
 
 const app = express();
 const server = http.createServer(app);
@@ -97,7 +98,7 @@ const chismeActions = {
 };
 
 function property(name, cost, rent, color) {
-  return { name, type: 'property', cost, rent, color, owner: null, mortgaged: false };
+  return { name, type: 'property', cost, rent, color, owner: null, mortgaged: false, houses: 0, hotel: false };
 }
 
 function event(name, eventType) {
@@ -115,11 +116,11 @@ function createBoard() {
     property('Jardines del Valle', 180, 45, '#2980b9'),
     property('Altia', 200, 50, '#2980b9'),
     event('Chisme de oficina', 'chisme'),
-    property('Universidad', 220, 55, '#16a085'),
+    property('Universidad', 220, 55, '#0f9bb2'),
     { name: 'Presidio', type: 'presidio', owner: null },
-    property('Guamilito', 230, 60, '#16a085'),
+    property('Rivera Hernandez', 230, 60, '#16a085'),
     event('Tragedia inesperada', 'tragedia'),
-    property('Centro', 240, 65, '#16a085'),
+    property('Felipe Zelaya', 240, 65, '#16a085'),
     property('Circunvalacion', 260, 70, '#f39c12'),
     event('Chisme viral', 'chisme'),
     property('El Pedregal', 270, 75, '#f39c12'),
@@ -159,7 +160,8 @@ function getRoomState(roomId, roomName) {
       currentTurnIndex: 0,
       gameStarted: false,
       endTime: null,
-      pendingAction: null
+      pendingAction: null,
+      tradeOffer: null
     };
   }
   return rooms[roomId];
@@ -207,6 +209,8 @@ function releaseProperties(roomState, player) {
     if (space.owner === player.id) {
       space.owner = null;
       space.mortgaged = false;
+      space.houses = 0;
+      space.hotel = false;
     }
   });
   player.properties = [];
@@ -216,10 +220,55 @@ function mortgageValue(space) {
   return Math.floor(space.cost / 2);
 }
 
+function houseCost(space) {
+  return Math.ceil(space.cost * 0.35);
+}
+
+function hotelCost(space) {
+  return Math.ceil(space.cost * 0.6);
+}
+
+function currentRent(space) {
+  if (space.hotel) return space.rent * 7;
+  return space.rent * (space.houses + 1);
+}
+
+function colorFamily(roomState, space) {
+  return roomState.board.filter((candidate) => candidate.type === 'property' && candidate.color === space.color);
+}
+
+function ownsCompleteFamily(roomState, player, space) {
+  const family = colorFamily(roomState, space);
+  return family.length >= 2 && family.every((candidate) => candidate.owner === player.id);
+}
+
+function canTradeProperty(roomState, space) {
+  return space
+    && space.type === 'property'
+    && !space.mortgaged
+    && colorFamily(roomState, space).every((candidate) => !candidate.houses && !candidate.hotel);
+}
+
+function clearTradeOffer(roomState, message) {
+  if (!roomState.tradeOffer) return;
+  io.to(roomState.tradeOffer.targetId).emit('tradeOfferClosed');
+  roomState.tradeOffer = null;
+  if (message) {
+    io.to(roomState.id).emit('chatMessage', { author: 'Intercambio', text: message, type: 'trade' });
+  }
+  emitState(roomState);
+}
+
+function improvementResaleValue(space) {
+  const housesValue = space.houses * Math.floor(houseCost(space) / 2);
+  const hotelValue = space.hotel ? Math.floor(hotelCost(space) / 2) : 0;
+  return housesValue + hotelValue;
+}
+
 function availableMortgageValue(roomState, player) {
   return roomState.board
     .filter((space) => space.owner === player.id && !space.mortgaged)
-    .reduce((total, space) => total + mortgageValue(space), 0);
+    .reduce((total, space) => total + mortgageValue(space) + improvementResaleValue(space), 0);
 }
 
 function eliminatePlayer(roomState, player, reason) {
@@ -284,8 +333,8 @@ function finishTurn(roomState, message) {
   emitState(roomState);
 }
 
-function resolveTurnPayment(roomState, player, message, bankruptcyReason) {
-  io.to(roomState.id).emit('chatMessage', { author: 'Juego', text: message });
+function resolveTurnPayment(roomState, player, message, bankruptcyReason, author = 'Juego', type) {
+  io.to(roomState.id).emit('chatMessage', { author, text: message, type });
   if (!settleOrRequestRescue(roomState, player, bankruptcyReason)) {
     clearPendingAction(roomState);
     roomState.currentTurnIndex = (roomState.currentTurnIndex + 1) % roomState.players.length;
@@ -407,6 +456,9 @@ io.on('connection', (socket) => {
     const playerIndex = roomState.players.findIndex((candidate) => candidate.id === socket.id);
     if (playerIndex !== roomState.currentTurnIndex) return;
     const player = roomState.players[playerIndex];
+    if (roomState.tradeOffer) {
+      clearTradeOffer(roomState, 'La propuesta pendiente vencio al comenzar la siguiente jugada.');
+    }
 
     if (player.skipTurns > 0) {
       player.skipTurns -= 1;
@@ -450,13 +502,29 @@ io.on('connection', (socket) => {
         finishTurn(roomState, `${actionText}No tiene saldo suficiente para comprar esta propiedad.`);
       } else if (space.owner !== player.id && !space.mortgaged) {
         const owner = roomState.players.find((candidate) => candidate.id === space.owner);
-        player.money -= space.rent;
-        if (owner) owner.money += space.rent;
+        const rent = currentRent(space);
+        const improvement = space.hotel ? ' con hotel' : space.houses ? ` con ${space.houses} casa${space.houses === 1 ? '' : 's'}` : '';
+        player.money -= rent;
+        if (owner) owner.money += rent;
+        socket.emit('transactionNotice', {
+          title: 'Pagaste renta',
+          text: `-${rent} Lps. por ${space.name}${improvement}.`,
+          tone: 'expense'
+        });
+        if (owner) {
+          io.to(owner.id).emit('transactionNotice', {
+            title: 'Cobraste renta',
+            text: `+${rent} Lps. de ${player.name} por ${space.name}${improvement}.`,
+            tone: 'income'
+          });
+        }
         resolveTurnPayment(
           roomState,
           player,
-          `${actionText}Pago ${space.rent} Lps. de renta a ${owner?.name || 'el dueno'}.`,
-          `No pudo pagar la renta de ${space.name}.`
+          `${player.name} pago ${rent} Lps. de renta a ${owner?.name || 'el dueno'} por ${space.name}${improvement}.`,
+          `No pudo pagar la renta de ${space.name}.`,
+          'Renta',
+          'rent'
         );
       } else if (space.owner !== player.id) {
         finishTurn(roomState, `${actionText}La propiedad esta hipotecada; no paga renta.`);
@@ -522,12 +590,18 @@ io.on('connection', (socket) => {
     };
     const handleChisme = (choice = {}) => {
       const target = roomState.players.find((candidate) => candidate.id === choice.targetId && candidate.id !== player.id);
-      if (choice.action === 'transfer' && target && player.properties.length) {
-        const propertyName = player.properties.shift();
+      const propertyName = player.properties.find((name) => {
+        const candidate = roomState.board.find((space) => space.name === name);
+        return canTradeProperty(roomState, candidate);
+      });
+      if (choice.action === 'transfer' && target && propertyName) {
         const ownedSpace = roomState.board.find((candidate) => candidate.name === propertyName);
         if (ownedSpace) ownedSpace.owner = target.id;
+        player.properties = player.properties.filter((name) => name !== propertyName);
         target.properties.push(propertyName);
         resolveChisme(`Transfirio ${propertyName} a ${target.name}.`);
+      } else if (choice.action === 'transfer' && target) {
+        resolveChisme('No tiene una propiedad libre de mejoras o hipotecas para transferir.');
       } else if (choice.action === 'give' && target && player.money >= 200) {
         player.money -= 200;
         target.money += 200;
@@ -594,6 +668,10 @@ io.on('connection', (socket) => {
         text: `${player.name} recupero ${space.name} por ${repayment} Lps.`
       });
     } else {
+      if (colorFamily(roomState, space).some((candidate) => candidate.houses || candidate.hotel)) {
+        socket.emit('actionFeedback', 'Vende primero las casas o el hotel de esta familia antes de hipotecar.');
+        return;
+      }
       const loan = mortgageValue(space);
       player.money += loan;
       space.mortgaged = true;
@@ -602,6 +680,159 @@ io.on('connection', (socket) => {
         text: `${player.name} hipoteco ${space.name} y recibio ${loan} Lps.`
       });
     }
+    if (roomState.pendingAction?.type === 'debt' && roomState.pendingAction.playerId === player.id && player.money > 0) {
+      clearPendingAction(roomState);
+      io.to(roomState.id).emit('chatMessage', {
+        author: 'Banco',
+        text: `${player.name} cubrio su deuda y sigue en la partida.`
+      });
+      roomState.currentTurnIndex = (roomState.currentTurnIndex + 1) % roomState.players.length;
+    }
+    emitState(roomState);
+  });
+
+  socket.on('upgradeProperty', ({ propertyName } = {}) => {
+    const roomState = rooms[socket.data.roomId];
+    const player = roomState?.players.find((candidate) => candidate.id === socket.id);
+    const space = roomState?.board.find((candidate) => candidate.name === propertyName && candidate.owner === socket.id);
+    if (!roomState || !player || !space || !roomState.gameStarted) return;
+    if (roomState.pendingAction?.type === 'debt' && roomState.pendingAction.playerId === player.id) {
+      socket.emit('actionFeedback', 'Primero cubri tu deuda antes de construir.');
+      return;
+    }
+    if (space.mortgaged) {
+      socket.emit('actionFeedback', 'Recupera la propiedad hipotecada antes de construir.');
+      return;
+    }
+    if (!ownsCompleteFamily(roomState, player, space)) {
+      const familySize = colorFamily(roomState, space).length;
+      const requirement = familySize >= 2
+        ? `Debes tener las ${familySize} propiedades del mismo color para construir.`
+        : 'Esta propiedad no pertenece a una familia construible.';
+      socket.emit('actionFeedback', requirement);
+      return;
+    }
+    if (space.hotel) {
+      socket.emit('actionFeedback', 'Esta propiedad ya tiene hotel.');
+      return;
+    }
+
+    const buildsHotel = space.houses === MAX_HOUSES;
+    const cost = buildsHotel ? hotelCost(space) : houseCost(space);
+    const label = buildsHotel ? 'un hotel' : 'una casa';
+    if (player.money <= cost) {
+      socket.emit('actionFeedback', `Necesitas mas de ${cost} Lps. para construir ${label} sin quebrar.`);
+      return;
+    }
+
+    player.money -= cost;
+    if (buildsHotel) {
+      space.hotel = true;
+    } else {
+      space.houses += 1;
+    }
+    const rent = currentRent(space);
+    io.to(roomState.id).emit('chatMessage', {
+      author: 'Construccion',
+      text: `${player.name} construyo ${label} en ${space.name}. Su renta ahora es ${rent} Lps.`
+    });
+    socket.emit('transactionNotice', {
+      title: buildsHotel ? 'Hotel construido' : 'Casa construida',
+      text: `-${cost} Lps. en ${space.name}. Renta: ${rent} Lps.`,
+      tone: 'expense'
+    });
+    emitState(roomState);
+  });
+
+  socket.on('proposeTrade', ({ offeredProperty, requestedProperty, targetId } = {}) => {
+    const roomState = rooms[socket.data.roomId];
+    const requester = roomState?.players.find((candidate) => candidate.id === socket.id);
+    const target = roomState?.players.find((candidate) => candidate.id === targetId && candidate.id !== socket.id);
+    const offered = roomState?.board.find((candidate) => candidate.name === offeredProperty && candidate.owner === socket.id);
+    const requested = roomState?.board.find((candidate) => candidate.name === requestedProperty && candidate.owner === targetId);
+    if (!roomState || !requester || !target || !roomState.gameStarted) return;
+    if (roomState.pendingAction || roomState.tradeOffer) {
+      socket.emit('actionFeedback', 'Espera a que termine la decision u oferta pendiente.');
+      return;
+    }
+    if (!canTradeProperty(roomState, offered) || !canTradeProperty(roomState, requested)) {
+      socket.emit('actionFeedback', 'Solo se pueden intercambiar familias sin mejoras ni propiedades hipotecadas.');
+      return;
+    }
+
+    roomState.tradeOffer = {
+      requesterId: requester.id,
+      requesterName: requester.name,
+      targetId: target.id,
+      targetName: target.name,
+      offeredProperty: offered.name,
+      requestedProperty: requested.name
+    };
+    io.to(target.id).emit('tradeOfferReceived', roomState.tradeOffer);
+    io.to(requester.id).emit('actionFeedback', `Oferta enviada a ${target.name}. Tiene hasta la proxima jugada para responder.`);
+    io.to(roomState.id).emit('chatMessage', {
+      author: 'Intercambio',
+      text: `${requester.name} propuso un intercambio a ${target.name}.`,
+      type: 'trade'
+    });
+    emitState(roomState);
+  });
+
+  socket.on('respondTrade', ({ accept } = {}) => {
+    const roomState = rooms[socket.data.roomId];
+    const offer = roomState?.tradeOffer;
+    if (!roomState || !offer || offer.targetId !== socket.id) return;
+    const requester = roomState.players.find((candidate) => candidate.id === offer.requesterId);
+    const target = roomState.players.find((candidate) => candidate.id === offer.targetId);
+    const offered = roomState.board.find((candidate) => candidate.name === offer.offeredProperty && candidate.owner === offer.requesterId);
+    const requested = roomState.board.find((candidate) => candidate.name === offer.requestedProperty && candidate.owner === offer.targetId);
+
+    if (!accept) {
+      clearTradeOffer(roomState, `${target?.name || 'El jugador'} rechazo el intercambio de ${offer.requesterName}.`);
+      return;
+    }
+    if (!requester || !target || !canTradeProperty(roomState, offered) || !canTradeProperty(roomState, requested)) {
+      clearTradeOffer(roomState, 'La propuesta ya no es valida y fue cancelada.');
+      return;
+    }
+
+    offered.owner = target.id;
+    requested.owner = requester.id;
+    requester.properties = requester.properties.filter((name) => name !== offered.name);
+    target.properties = target.properties.filter((name) => name !== requested.name);
+    requester.properties.push(requested.name);
+    target.properties.push(offered.name);
+    clearTradeOffer(
+      roomState,
+      `${target.name} acepto: ${requester.name} recibe ${requested.name} y ${target.name} recibe ${offered.name}.`
+    );
+  });
+
+  socket.on('sellImprovement', ({ propertyName } = {}) => {
+    const roomState = rooms[socket.data.roomId];
+    const player = roomState?.players.find((candidate) => candidate.id === socket.id);
+    const space = roomState?.board.find((candidate) => candidate.name === propertyName && candidate.owner === socket.id);
+    if (!roomState || !player || !space || !roomState.gameStarted || space.mortgaged) return;
+    if (!space.hotel && !space.houses) return;
+
+    const soldHotel = space.hotel;
+    const refund = soldHotel ? Math.floor(hotelCost(space) / 2) : Math.floor(houseCost(space) / 2);
+    if (soldHotel) {
+      space.hotel = false;
+    } else {
+      space.houses -= 1;
+    }
+    player.money += refund;
+    io.to(roomState.id).emit('chatMessage', {
+      author: 'Construccion',
+      text: `${player.name} vendio ${soldHotel ? 'el hotel' : 'una casa'} de ${space.name} y recibio ${refund} Lps.`
+    });
+    socket.emit('transactionNotice', {
+      title: soldHotel ? 'Hotel vendido' : 'Casa vendida',
+      text: `+${refund} Lps. por ${space.name}.`,
+      tone: 'income'
+    });
+
     if (roomState.pendingAction?.type === 'debt' && roomState.pendingAction.playerId === player.id && player.money > 0) {
       clearPendingAction(roomState);
       io.to(roomState.id).emit('chatMessage', {

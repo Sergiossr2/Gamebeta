@@ -41,7 +41,13 @@ La ruta `GET /health` responde el estado basico usado por el hosting.
 ## Dinamica De La Partida
 
 - Al caer en un lugar disponible, el jugador decide si comprarlo o pasar.
+- `Rivera Hernandez` y `Felipe Zelaya` forman una familia de dos propiedades.
 - Los lugares comprados aparecen en **Mis lugares** y pueden hipotecarse para recuperar fondos.
+- Para construir se deben poseer las 2 o 3 propiedades que comparten color.
+- Una familia completa puede mejorarse con hasta 4 casas por lugar y luego un hotel para aumentar su renta.
+- Las mejoras se pueden vender a mitad de su costo antes de hipotecar o para cubrir una deuda.
+- Se pueden proponer intercambios de propiedades sin mejoras ni hipotecas; la otra persona acepta o rechaza antes de la siguiente jugada.
+- El dado se muestra en el centro y la ficha avanza animada por el tablero.
 - El panel de jugadores muestra fortuna disponible y patrimonio total aproximado.
 - Una propiedad hipotecada no cobra renta hasta pagar su recuperacion.
 - Si una deuda deja el saldo en cero o negativo, el jugador puede hipotecar sus lugares antes de quedar fuera.

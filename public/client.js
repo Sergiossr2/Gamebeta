@@ -14,6 +14,7 @@ const rollBtn = document.getElementById('rollBtn');
 const startBtn = document.getElementById('startBtn');
 const turnInfo = document.getElementById('turnInfo');
 const currentRoomLabel = document.getElementById('currentRoomLabel');
+const transactionNotice = document.getElementById('transactionNotice');
 const messages = document.getElementById('messages');
 const chatText = document.getElementById('chatText');
 const sendBtn = document.getElementById('sendBtn');
@@ -34,7 +35,14 @@ let currentRoomId = null;
 let currentRoomName = '';
 let latestState = null;
 let movementAnimation = null;
+let movementPhase = null;
+let movementPlayerName = '';
+let movementRoll = null;
+let movingPlayerId = null;
+let landingPosition = null;
+let movementCompletionQueue = [];
 let activeDecision = null;
+let transactionNoticeTimeout = null;
 
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (character) => ({
@@ -50,10 +58,77 @@ function formatLempiras(value) {
   return `L ${new Intl.NumberFormat('es-HN').format(value)}`;
 }
 
+function houseCost(space) {
+  return Math.ceil(space.cost * 0.35);
+}
+
+function hotelCost(space) {
+  return Math.ceil(space.cost * 0.6);
+}
+
+function currentRent(space) {
+  if (space.hotel) return space.rent * 7;
+  return space.rent * ((space.houses || 0) + 1);
+}
+
+function colorFamily(state, space) {
+  return state.board.filter((candidate) => candidate.type === 'property' && candidate.color === space.color);
+}
+
+function ownsCompleteFamily(state, player, space) {
+  const family = colorFamily(state, space);
+  return family.length >= 2 && family.every((candidate) => candidate.owner === player.id);
+}
+
+function familyHasImprovements(state, space) {
+  return colorFamily(state, space).some((candidate) => candidate.houses || candidate.hotel);
+}
+
+function canTradeProperty(state, space) {
+  return !space.mortgaged && !familyHasImprovements(state, space);
+}
+
+function improvementLabel(space) {
+  if (space.hotel) return 'Hotel';
+  if (space.houses) return `${space.houses} casa${space.houses === 1 ? '' : 's'}`;
+  return 'Sin mejoras';
+}
+
+function showTransactionNotice({ title, text, tone = 'neutral' }) {
+  if (!transactionNotice) return;
+  if (transactionNoticeTimeout) clearTimeout(transactionNoticeTimeout);
+  transactionNotice.className = `transaction-notice ${tone === 'income' ? 'income' : tone === 'expense' ? 'expense' : ''}`;
+  transactionNotice.innerHTML = `<strong>${escapeHtml(title)}</strong><span>${escapeHtml(text)}</span>`;
+  transactionNoticeTimeout = setTimeout(() => {
+    transactionNotice.classList.add('hidden');
+  }, 5000);
+}
+
+function afterMovement(callback) {
+  if (movementAnimation) {
+    movementCompletionQueue.push(callback);
+  } else {
+    callback();
+  }
+}
+
+function finishMovement() {
+  movementPhase = null;
+  movementPlayerName = '';
+  movementRoll = null;
+  movingPlayerId = null;
+  landingPosition = null;
+  movementAnimation = null;
+  if (latestState) renderBoard(latestState);
+  movementCompletionQueue.splice(0).forEach((callback) => callback());
+}
+
 function calculatePatrimony(state, player) {
   const equity = state.board
     .filter((space) => space.owner === player.id)
-    .reduce((total, space) => total + (space.mortgaged ? Math.floor(space.cost / 2) : space.cost), 0);
+    .reduce((total, space) => total + (space.mortgaged
+      ? Math.floor(space.cost / 2)
+      : space.cost + ((space.houses || 0) * houseCost(space)) + (space.hotel ? hotelCost(space) : 0)), 0);
   return player.money + equity;
 }
 
@@ -143,6 +218,8 @@ function closeModal() {
     socket.emit('propertyDecision', { action: 'pass' });
   } else if (activeDecision === 'chisme') {
     socket.emit('chismeAction', { action: 'gossip' });
+  } else if (activeDecision === 'trade') {
+    socket.emit('respondTrade', { accept: false });
   }
   activeDecision = null;
   cardModal.classList.add('hidden');
@@ -289,11 +366,13 @@ socket.on('gameState', (state) => {
 
 socket.on('chatMessage', (message) => {
   const el = document.createElement('div');
-  el.className = 'message';
+  el.className = `message${message.type === 'rent' ? ' rent-message' : message.type === 'trade' ? ' trade-message' : ''}`;
   el.innerHTML = `<strong>${escapeHtml(message.author)}:</strong> ${escapeHtml(message.text)}`;
   messages.appendChild(el);
   messages.scrollTop = messages.scrollHeight;
 });
+
+socket.on('transactionNotice', (notice) => afterMovement(() => showTransactionNotice(notice)));
 
 socket.on('timer', ({ remaining }) => {
   const s = Math.max(0, Math.floor(remaining / 1000));
@@ -311,6 +390,7 @@ socket.on('gameOver', ({ winner, finalState }) => {
 });
 
 socket.on('chismeOptions', ({ text, options, players }) => {
+  afterMovement(() => {
   activeDecision = 'chisme';
   renderModalCard({
     title: 'Carta Chisme',
@@ -343,6 +423,7 @@ socket.on('chismeOptions', ({ text, options, players }) => {
       }
     }))
   });
+  });
 });
 
 socket.on('rolled', ({ playerId: pid, roll, fromPosition, toPosition }) => {
@@ -360,6 +441,7 @@ socket.on('rolled', ({ playerId: pid, roll, fromPosition, toPosition }) => {
 });
 
 socket.on('cardDrawn', (card) => {
+  afterMovement(() => {
   activeDecision = null;
   renderModalCard({
     title: card.title || 'Carta',
@@ -373,9 +455,11 @@ socket.on('cardDrawn', (card) => {
       }
     ]
   });
+  });
 });
 
 socket.on('propertyOffer', ({ property, money }) => {
+  afterMovement(() => {
   activeDecision = 'property';
   renderModalCard({
     title: 'Propiedad disponible',
@@ -397,6 +481,35 @@ socket.on('propertyOffer', ({ property, money }) => {
       }
     ]
   });
+  });
+});
+
+socket.on('tradeOfferReceived', (offer) => {
+  activeDecision = 'trade';
+  renderModalCard({
+    title: 'Propuesta de intercambio',
+    text: `${offer.requesterName} ofrece ${offer.offeredProperty} a cambio de tu propiedad ${offer.requestedProperty}.`,
+    options: [
+      {
+        label: 'Aceptar intercambio',
+        onClick: () => {
+          socket.emit('respondTrade', { accept: true });
+          completeDecision();
+        }
+      },
+      {
+        label: 'Rechazar',
+        onClick: () => {
+          socket.emit('respondTrade', { accept: false });
+          completeDecision();
+        }
+      }
+    ]
+  });
+});
+
+socket.on('tradeOfferClosed', () => {
+  if (activeDecision === 'trade') completeDecision();
 });
 
 socket.on('actionFeedback', (message) => {
@@ -412,7 +525,7 @@ socket.on('debtWarning', ({ balance, mortgageValue, needed, reason }) => {
   activeDecision = 'debt';
   renderModalCard({
     title: 'Cuenta pendiente',
-    text: `${reason} Tu saldo es ${formatLempiras(balance)}. Hipotecá propiedades por al menos ${formatLempiras(needed)} para continuar. Disponible en hipotecas: ${formatLempiras(mortgageValue)}.`,
+    text: `${reason} Tu saldo es ${formatLempiras(balance)}. Vende mejoras o hipoteca propiedades por al menos ${formatLempiras(needed)} para continuar. Disponible en liquidacion: ${formatLempiras(mortgageValue)}.`,
     options: [
       {
         label: 'Ir a Mis lugares',
@@ -441,6 +554,10 @@ socket.on('eliminated', ({ reason }) => {
 function renderPlayers(state) {
   playersList.innerHTML = '<h2>Jugadores</h2>';
   state.players.forEach((player) => {
+    const improvements = state.board
+      .filter((space) => space.owner === player.id && (space.houses || space.hotel))
+      .map((space) => `${space.name} (${improvementLabel(space)})`)
+      .join(', ');
     const card = document.createElement('div');
     card.className = 'player-card';
     card.innerHTML = `
@@ -449,6 +566,7 @@ function renderPlayers(state) {
       <div>Patrimonio: ${formatLempiras(calculatePatrimony(state, player))}</div>
       <div>Posición: ${player.position}</div>
       <div>Propiedades: ${escapeHtml(player.properties.join(', ') || 'Ninguna')}</div>
+      ${improvements ? `<div>Mejoras: ${escapeHtml(improvements)}</div>` : ''}
     `;
     playersList.appendChild(card);
   });
@@ -463,6 +581,7 @@ function renderPortfolio(state) {
   }
 
   const properties = state.board.filter((space) => space.owner === playerId);
+  const requestedProperties = state.board.filter((space) => space.owner && space.owner !== playerId && canTradeProperty(state, space));
   if (!properties.length) {
     portfolio.innerHTML += '<div class="empty">Todavía no tenés propiedades.</div>';
     return;
@@ -474,27 +593,98 @@ function renderPortfolio(state) {
     warning.textContent = 'Tenés una deuda pendiente: hipotecá propiedades para seguir jugando.';
     portfolio.appendChild(warning);
   }
+  if (state.tradeOffer) {
+    const offer = document.createElement('div');
+    offer.className = 'trade-banner';
+    offer.textContent = `${state.tradeOffer.requesterName} ofrece ${state.tradeOffer.offeredProperty} por ${state.tradeOffer.requestedProperty}.`;
+    portfolio.appendChild(offer);
+  }
 
   properties.forEach((space) => {
     const item = document.createElement('div');
     item.className = `portfolio-item${space.mortgaged ? ' mortgaged' : ''}`;
+    const hasImprovements = Boolean(space.houses || space.hotel);
+    const family = colorFamily(state, space);
+    const completeFamily = ownsCompleteFamily(state, player, space);
     item.innerHTML = `
       <div>
         <strong>${escapeHtml(space.name)}</strong>
-        <span>${space.mortgaged ? 'Hipotecada: sin renta' : `Renta ${formatLempiras(space.rent)}`}</span>
+        <span>${space.mortgaged ? 'Hipotecada: sin renta' : `Renta actual ${formatLempiras(currentRent(space))}`}</span>
+        <span class="improvement-status">${escapeHtml(improvementLabel(space))}</span>
+        <span class="family-status ${completeFamily ? 'complete' : ''}">${family.length >= 2 ? `Familia: ${family.filter((candidate) => candidate.owner === playerId).length}/${family.length}` : 'Sin familia construible'}</span>
       </div>
     `;
     const button = document.createElement('button');
     button.type = 'button';
     const resolvingDebt = state.pendingAction?.type === 'debt' && state.pendingAction.playerId === playerId;
-    button.disabled = !state.gameStarted || (resolvingDebt && space.mortgaged);
+    const improvedFamily = familyHasImprovements(state, space);
+    button.disabled = !state.gameStarted || (resolvingDebt && space.mortgaged) || (!space.mortgaged && improvedFamily);
+    button.title = improvedFamily && !space.mortgaged ? 'Vende las mejoras de la familia antes de hipotecar.' : '';
     button.textContent = space.mortgaged
       ? `Recuperar ${formatLempiras(Math.ceil(space.cost * 0.55))}`
       : `Hipotecar ${formatLempiras(Math.floor(space.cost / 2))}`;
     button.addEventListener('click', () => {
       socket.emit('mortgageProperty', { propertyName: space.name });
     });
-    item.appendChild(button);
+    const actions = document.createElement('div');
+    actions.className = 'portfolio-actions';
+    actions.appendChild(button);
+    if (!space.hotel) {
+      const buildButton = document.createElement('button');
+      const buildsHotel = space.houses === 4;
+      buildButton.type = 'button';
+      buildButton.className = 'build-button';
+      buildButton.disabled = !state.gameStarted || space.mortgaged || resolvingDebt || !completeFamily;
+      buildButton.title = completeFamily ? '' : 'Compra toda la familia del mismo color para construir.';
+      buildButton.textContent = buildsHotel
+        ? `Hotel ${formatLempiras(hotelCost(space))}`
+        : `Casa ${formatLempiras(houseCost(space))}`;
+      buildButton.addEventListener('click', () => {
+        socket.emit('upgradeProperty', { propertyName: space.name });
+      });
+      actions.appendChild(buildButton);
+    }
+    if (canTradeProperty(state, space) && requestedProperties.length) {
+      const tradeButton = document.createElement('button');
+      tradeButton.type = 'button';
+      tradeButton.className = 'trade-button';
+      tradeButton.disabled = !state.gameStarted || Boolean(state.pendingAction) || Boolean(state.tradeOffer);
+      tradeButton.textContent = 'Intercambiar';
+      tradeButton.addEventListener('click', () => {
+        renderModalCard({
+          title: 'Proponer intercambio',
+          text: `Ofrecerás ${space.name}. Elegí qué propiedad querés recibir:`,
+          options: requestedProperties.map((requested) => {
+            const owner = state.players.find((candidate) => candidate.id === requested.owner);
+            return {
+              label: `${requested.name} de ${owner?.name || 'jugador'}`,
+              onClick: () => {
+                socket.emit('proposeTrade', {
+                  offeredProperty: space.name,
+                  requestedProperty: requested.name,
+                  targetId: requested.owner
+                });
+                completeDecision();
+              }
+            };
+          })
+        });
+      });
+      actions.appendChild(tradeButton);
+    }
+    if (hasImprovements) {
+      const sellButton = document.createElement('button');
+      const refund = space.hotel ? Math.floor(hotelCost(space) / 2) : Math.floor(houseCost(space) / 2);
+      sellButton.type = 'button';
+      sellButton.className = 'sell-button';
+      sellButton.disabled = !state.gameStarted || space.mortgaged;
+      sellButton.textContent = `Vender mejora +${formatLempiras(refund)}`;
+      sellButton.addEventListener('click', () => {
+        socket.emit('sellImprovement', { propertyName: space.name });
+      });
+      actions.appendChild(sellButton);
+    }
+    item.appendChild(actions);
     portfolio.appendChild(item);
   });
 }
@@ -506,19 +696,28 @@ function animateMovement(pid, roll, fromPosition, toPosition) {
   if (!player) return;
   if (movementAnimation) clearTimeout(movementAnimation);
   player.position = fromPosition;
+  movementPhase = 'rolling';
+  movementPlayerName = player.name;
+  movementRoll = roll;
+  movingPlayerId = pid;
+  landingPosition = null;
+  renderBoard(animatedState);
   let step = 0;
   const move = () => {
+    movementPhase = 'moving';
     step += 1;
     player.position = (fromPosition + step) % animatedState.board.length;
     renderBoard(animatedState);
     if (step < roll) {
-      movementAnimation = setTimeout(move, 155);
+      movementAnimation = setTimeout(move, 250);
     } else {
-      movementAnimation = null;
+      movementPhase = 'landed';
+      landingPosition = toPosition;
       if (latestState) renderBoard(latestState);
+      movementAnimation = setTimeout(finishMovement, 650);
     }
   };
-  movementAnimation = setTimeout(move, 110);
+  movementAnimation = setTimeout(move, 900);
 }
 
 function renderBoard(state) {
@@ -547,12 +746,13 @@ function renderBoard(state) {
       cell.classList.add('center');
       if (r === 1 && c === 1) {
         cell.innerHTML = `
-          <div class="board-seal">
+          <div class="board-seal${movementPhase ? ' dimmed' : ''}">
             <span class="board-stars">★ ★ ★ ★ ★</span>
             <strong>Catrachópolis</strong>
             <small>SAN PEDRO SULA</small>
             <p>Comprá. Negociá. Ganá.</p>
           </div>
+          ${movementPhase ? `<div class="center-roll ${movementPhase}"><span>${escapeHtml(movementPlayerName)}</span><strong>${movementRoll}</strong><small>${movementPhase === 'rolling' ? 'LANZANDO DADO' : movementPhase === 'moving' ? 'AVANZANDO' : 'LLEGO A SU DESTINO'}</small></div>` : ''}
         `;
         grid.appendChild(cell);
       }
@@ -564,9 +764,13 @@ function renderBoard(state) {
       const space = state.board[boardIdx];
       const owner = state.players.find((p) => p.id === space.owner);
       if (space.mortgaged) cell.classList.add('mortgaged');
+      if (movingPlayerId && state.players.some((player) => player.id === movingPlayerId && player.position === boardIdx)) {
+        cell.classList.add('movement-space');
+      }
+      if (landingPosition === boardIdx) cell.classList.add('landing-space');
       cell.innerHTML = `
         <div class="title">${boardIdx}. ${escapeHtml(space.name)}</div>
-        ${space.type === 'property' ? `<div class="space-price">${formatLempiras(space.cost)}</div><div class="space-rent">${space.mortgaged ? 'HIPOTECADA' : `Renta ${formatLempiras(space.rent)}`}</div><div class="space-owner">${escapeHtml(owner?.name || 'Disponible')}</div>` : `<div class="space-event">${space.eventType === 'chisme' ? 'Chisme' : space.eventType === 'tragedia' ? 'Tragedia' : space.eventType === 'premio' ? 'Premio' : escapeHtml(space.name)}</div>`}
+        ${space.type === 'property' ? `<div class="space-price">${formatLempiras(space.cost)}</div><div class="space-rent">${space.mortgaged ? 'HIPOTECADA' : `Renta ${formatLempiras(currentRent(space))}`}</div>${(space.houses || space.hotel) ? `<div class="space-upgrade">${escapeHtml(improvementLabel(space))}</div>` : ''}<div class="space-owner">${escapeHtml(owner?.name || 'Disponible')}</div>` : `<div class="space-event">${space.eventType === 'chisme' ? 'Chisme' : space.eventType === 'tragedia' ? 'Tragedia' : space.eventType === 'premio' ? 'Premio' : escapeHtml(space.name)}</div>`}
       `;
 
       if (space.color) {
@@ -587,7 +791,7 @@ function renderBoard(state) {
         if (player.position === boardIdx) {
           // show avatar thumbnail as token if available
           const img = document.createElement('img');
-          img.className = 'token-avatar';
+          img.className = `token-avatar${player.id === movingPlayerId ? ' moving-token' : ''}`;
           img.src = player.avatar || 'assets/avatar1.svg';
           img.title = player.name;
           img.style.width = '22px';

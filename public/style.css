@@ -437,6 +437,58 @@ button:disabled {
   background: rgba(17, 119, 203, 0.12);
 }
 
+.transaction-notice {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: -8px 0 18px;
+  padding: 13px 16px;
+  border: 1px solid rgba(243, 200, 88, 0.35);
+  border-radius: 14px;
+  background: rgba(243, 200, 88, 0.13);
+  color: var(--text);
+  animation: noticeIn 0.2s ease-out;
+}
+
+.transaction-notice strong {
+  flex-shrink: 0;
+  color: var(--gold);
+}
+
+.transaction-notice span {
+  color: var(--muted);
+}
+
+.transaction-notice.income {
+  border-color: rgba(43, 196, 138, 0.4);
+  background: rgba(43, 196, 138, 0.14);
+}
+
+.transaction-notice.income strong {
+  color: #9af2d1;
+}
+
+.transaction-notice.expense {
+  border-color: rgba(238, 98, 82, 0.38);
+  background: rgba(238, 98, 82, 0.12);
+}
+
+.transaction-notice.expense strong {
+  color: #ffd1cb;
+}
+
+@keyframes noticeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .turn-pill {
   color: #fff;
   font-weight: 700;
@@ -525,6 +577,46 @@ button:disabled {
   font-size: 0.75rem;
 }
 
+.improvement-status {
+  color: #9af2d1 !important;
+  font-weight: 700;
+}
+
+.family-status {
+  color: rgba(224, 239, 255, 0.56) !important;
+}
+
+.family-status.complete {
+  color: var(--gold) !important;
+  font-weight: 700;
+}
+
+.portfolio-actions {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.portfolio-actions .sell-button {
+  grid-column: 1 / -1;
+  border: 1px solid rgba(243, 200, 88, 0.3);
+  background: rgba(243, 200, 88, 0.12);
+  box-shadow: none;
+  color: var(--gold);
+}
+
+.portfolio-actions .build-button {
+  background: linear-gradient(135deg, #28b47e, #167e61);
+  box-shadow: 0 10px 22px rgba(43, 196, 138, 0.16);
+}
+
+.portfolio-actions .trade-button {
+  border: 1px solid rgba(85, 183, 239, 0.35);
+  background: rgba(17, 119, 203, 0.15);
+  box-shadow: none;
+  color: #b7e4ff;
+}
+
 .portfolio-item.mortgaged {
   border-color: rgba(243, 200, 88, 0.3);
   background: rgba(243, 200, 88, 0.08);
@@ -537,6 +629,17 @@ button:disabled {
   border-radius: 11px;
   background: rgba(238, 98, 82, 0.12);
   color: #ffd1cb;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.trade-banner {
+  margin-bottom: 10px;
+  padding: 10px;
+  border: 1px solid rgba(85, 183, 239, 0.32);
+  border-radius: 11px;
+  background: rgba(17, 119, 203, 0.12);
+  color: #c8ebff;
   font-size: 0.8rem;
   line-height: 1.4;
 }
@@ -605,6 +708,14 @@ button:disabled {
   line-height: 1.18;
 }
 
+.space-upgrade {
+  padding: 2px 4px;
+  border-radius: 4px;
+  background: rgba(43, 196, 138, 0.15);
+  color: #116446;
+  font-weight: 800;
+}
+
 .space.mortgaged {
   filter: saturate(0.45);
   background: #ecf0f3;
@@ -613,6 +724,17 @@ button:disabled {
 .space.mortgaged .space-rent {
   color: #b34d38;
   font-weight: 800;
+}
+
+.space.movement-space {
+  z-index: 2;
+  border-color: var(--blue-light);
+  box-shadow: 0 0 0 2px rgba(85, 183, 239, 0.65), 0 0 20px rgba(85, 183, 239, 0.4);
+}
+
+.space.landing-space {
+  animation: landingPulse 0.65s ease-out;
+  border-color: var(--gold);
 }
 
 .space-event {
@@ -644,6 +766,59 @@ button:disabled {
   justify-items: center;
   text-align: center;
   transform: rotate(-7deg);
+}
+
+.board-seal.dimmed {
+  opacity: 0.2;
+  transform: rotate(-7deg) scale(0.94);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.center-roll {
+  position: absolute;
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  padding: 22px 36px;
+  border: 1px solid rgba(85, 183, 239, 0.38);
+  border-radius: 22px;
+  background: rgba(4, 18, 30, 0.88);
+  box-shadow: 0 22px 46px rgba(0, 0, 0, 0.34);
+  text-align: center;
+}
+
+.center-roll span {
+  color: #fff;
+  font-weight: 750;
+}
+
+.center-roll strong {
+  display: grid;
+  width: 82px;
+  height: 82px;
+  place-items: center;
+  border-radius: 20px;
+  background: #fff;
+  color: var(--blue-deep);
+  font-size: 2.8rem;
+}
+
+.center-roll small {
+  color: var(--blue-light);
+  font-weight: 800;
+  letter-spacing: 0.16em;
+}
+
+.center-roll.rolling strong {
+  animation: centerDiceRoll 0.28s linear infinite;
+}
+
+.center-roll.landed {
+  border-color: rgba(243, 200, 88, 0.54);
+}
+
+.center-roll.landed small {
+  color: var(--gold);
 }
 
 .board-seal strong {
@@ -689,6 +864,14 @@ button:disabled {
   background: #fff;
 }
 
+.token-avatar.moving-token {
+  width: 27px !important;
+  height: 27px !important;
+  border: 2px solid var(--blue-light);
+  box-shadow: 0 0 0 3px rgba(85, 183, 239, 0.2), 0 5px 15px rgba(8, 44, 75, 0.45);
+  animation: movingToken 0.3s ease-in-out infinite alternate;
+}
+
 .dice-area {
   display: flex;
   align-items: center;
@@ -728,6 +911,24 @@ button:disabled {
   }
 }
 
+@keyframes centerDiceRoll {
+  to {
+    transform: rotate(90deg) scale(1.05);
+  }
+}
+
+@keyframes movingToken {
+  to {
+    transform: translateY(-4px) scale(1.08);
+  }
+}
+
+@keyframes landingPulse {
+  50% {
+    box-shadow: 0 0 0 4px rgba(243, 200, 88, 0.42), 0 0 25px rgba(243, 200, 88, 0.3);
+  }
+}
+
 .chat-box {
   margin-top: 18px;
 }
@@ -756,6 +957,24 @@ button:disabled {
 
 .message strong {
   color: var(--gold);
+}
+
+.rent-message {
+  padding: 10px 12px;
+  border: 1px solid rgba(243, 200, 88, 0.3);
+  border-radius: 10px;
+  background: rgba(243, 200, 88, 0.1);
+  color: var(--text);
+}
+
+.rent-message strong {
+  color: #ffe29a;
+}
+
+.message.trade-message {
+  padding: 9px 11px;
+  border-left: 3px solid var(--blue-light);
+  background: rgba(17, 119, 203, 0.09);
 }
 
 .chat-input {
@@ -860,6 +1079,12 @@ button:disabled {
   .game-status {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .transaction-notice {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
   }
 
   .chat-input {
