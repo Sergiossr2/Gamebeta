@@ -180,6 +180,7 @@ h2 {
 .players-list,
 .room-list,
 .players,
+.portfolio,
 .chat-box {
   padding: 20px;
   border: 1px solid var(--line);
@@ -488,6 +489,47 @@ button:disabled {
   font-weight: 700;
 }
 
+.side-column {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+}
+
+.portfolio h2 {
+  margin-bottom: 12px;
+}
+
+.portfolio-item {
+  display: grid;
+  gap: 9px;
+  margin-bottom: 10px;
+  padding: 10px;
+  border: 1px solid rgba(85, 183, 239, 0.13);
+  border-radius: 12px;
+  background: rgba(17, 119, 203, 0.08);
+}
+
+.portfolio-item strong,
+.portfolio-item span {
+  display: block;
+}
+
+.portfolio-item span {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.portfolio-item button {
+  padding: 8px 9px;
+  font-size: 0.75rem;
+}
+
+.portfolio-item.mortgaged {
+  border-color: rgba(243, 200, 88, 0.3);
+  background: rgba(243, 200, 88, 0.08);
+}
+
 .board-container {
   display: flex;
   justify-content: center;
@@ -550,6 +592,16 @@ button:disabled {
 .space-event {
   color: rgba(7, 27, 46, 0.7);
   line-height: 1.18;
+}
+
+.space.mortgaged {
+  filter: saturate(0.45);
+  background: #ecf0f3;
+}
+
+.space.mortgaged .space-rent {
+  color: #b34d38;
+  font-weight: 800;
 }
 
 .space-event {

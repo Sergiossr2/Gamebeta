@@ -5,6 +5,7 @@ const roomNameInput = document.getElementById('roomName');
 const lobby = document.getElementById('lobby');
 const gameRoom = document.getElementById('gameRoom');
 const playersList = document.getElementById('playersList');
+const portfolio = document.getElementById('portfolio');
 const roomListContainer = document.querySelector('#roomList .room-list-items');
 const createModeBtn = document.getElementById('createModeBtn');
 const joinModeBtn = document.getElementById('joinModeBtn');
@@ -31,6 +32,9 @@ let playerId = null;
 let playerName = '';
 let currentRoomId = null;
 let currentRoomName = '';
+let latestState = null;
+let movementAnimation = null;
+let activeDecision = null;
 
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (character) => ({
@@ -44,6 +48,15 @@ function escapeHtml(value) {
 
 function formatLempiras(value) {
   return `L ${new Intl.NumberFormat('es-HN').format(value)}`;
+}
+
+function renderGameState(state, options = {}) {
+  latestState = state;
+  renderPlayers(state);
+  renderPortfolio(state);
+  renderLobby(state);
+  updateControls(state);
+  if (!options.skipBoard && !movementAnimation) renderBoard(state);
 }
 
 joinBtn.addEventListener('click', () => {
@@ -119,6 +132,18 @@ function openModal() {
 }
 
 function closeModal() {
+  if (activeDecision === 'property') {
+    socket.emit('propertyDecision', { action: 'pass' });
+  } else if (activeDecision === 'chisme') {
+    socket.emit('chismeAction', { action: 'gossip' });
+  }
+  activeDecision = null;
+  cardModal.classList.add('hidden');
+  modalOptions.innerHTML = '';
+}
+
+function completeDecision() {
+  activeDecision = null;
   cardModal.classList.add('hidden');
   modalOptions.innerHTML = '';
 }
@@ -160,10 +185,14 @@ function updateControls(state) {
   const amHost = state.players[0]?.id === playerId;
   const enoughPlayers = state.players.length >= 2;
 
-  turnInfo.textContent = current ? `Turno: ${current.name}` : 'Esperando jugadores...';
+  if (state.pendingAction && current) {
+    turnInfo.textContent = `Turno: ${current.name} - esperando decisión`;
+  } else {
+    turnInfo.textContent = current ? `Turno: ${current.name}` : 'Esperando jugadores...';
+  }
   timerEl.textContent = timerEl.textContent || '00:00';
 
-  rollBtn.disabled = !state.gameStarted || current?.id !== playerId;
+  rollBtn.disabled = !state.gameStarted || current?.id !== playerId || Boolean(state.pendingAction);
   startBtn.disabled = !amHost || state.gameStarted || !enoughPlayers;
 
   if (!amHost) {
@@ -238,10 +267,7 @@ socket.on('joinSuccess', ({ playerId: id, state, roomId, roomName }) => {
   currentRoomLabel.textContent = `Sala: ${roomName}`;
   lobby.classList.add('hidden');
   gameRoom.classList.remove('hidden');
-  renderPlayers(state);
-  renderBoard(state);
-  renderLobby(state);
-  updateControls(state);
+  renderGameState(state);
   setJoinFeedback('¡Bienvenido! Estás conectado.', 'info');
   joinBtn.textContent = 'Entrar al juego';
 });
@@ -249,10 +275,7 @@ socket.on('joinSuccess', ({ playerId: id, state, roomId, roomName }) => {
 socket.on('roomList', renderRoomList);
 
 socket.on('gameState', (state) => {
-  renderPlayers(state);
-  renderBoard(state);
-  renderLobby(state);
-  updateControls(state);
+  renderGameState(state, { skipBoard: Boolean(movementAnimation) });
 });
 
 socket.on('chatMessage', (message) => {
@@ -272,15 +295,17 @@ socket.on('timer', ({ remaining }) => {
 });
 
 socket.on('gameOver', ({ winner, finalState }) => {
+  completeDecision();
   alert(`Juego terminado. Ganador: ${winner?.name || 'Nadie'}. Fortuna: ${formatLempiras(winner?.money || 0)}.`);
   rollBtn.disabled = true;
   startBtn.disabled = false;
 });
 
-socket.on('chismeOptions', ({ options, players }) => {
+socket.on('chismeOptions', ({ text, options, players }) => {
+  activeDecision = 'chisme';
   renderModalCard({
     title: 'Carta Chisme',
-    text: 'Elige qué hacer con el chisme:',
+    text: `${text} Elegí qué hacer:`,
     options: options.map((option) => ({
       label: option.text,
       onClick: () => {
@@ -288,7 +313,7 @@ socket.on('chismeOptions', ({ options, players }) => {
           const otherPlayers = players.filter(p => p.id !== playerId);
           if (otherPlayers.length === 0) {
             socket.emit('chismeAction', { action: 'gossip' });
-            closeModal();
+            completeDecision();
             return;
           }
           renderModalCard({
@@ -298,20 +323,20 @@ socket.on('chismeOptions', ({ options, players }) => {
               label: target.name,
               onClick: () => {
                 socket.emit('chismeAction', { action: option.kind === 'transfer' ? 'transfer' : 'give', targetId: target.id });
-                closeModal();
+                completeDecision();
               }
             }))
           });
         } else {
           socket.emit('chismeAction', { action: 'gossip' });
-          closeModal();
+          completeDecision();
         }
       }
     }))
   });
 });
 
-socket.on('rolled', ({ playerId: pid, roll }) => {
+socket.on('rolled', ({ playerId: pid, roll, fromPosition, toPosition }) => {
   // animate dice briefly and show roll
   diceEl.classList.add('rolling');
   setTimeout(() => {
@@ -322,9 +347,11 @@ socket.on('rolled', ({ playerId: pid, roll }) => {
   if (pid === playerId) {
     rollBtn.disabled = true;
   }
+  animateMovement(pid, roll, fromPosition, toPosition);
 });
 
 socket.on('cardDrawn', (card) => {
+  activeDecision = null;
   renderModalCard({
     title: card.title || 'Carta',
     text: card.text || '',
@@ -332,10 +359,52 @@ socket.on('cardDrawn', (card) => {
       {
         label: 'Aceptar',
         onClick: () => {
-          closeModal();
+          completeDecision();
         }
       }
     ]
+  });
+});
+
+socket.on('propertyOffer', ({ property, money }) => {
+  activeDecision = 'property';
+  renderModalCard({
+    title: 'Propiedad disponible',
+    text: `${property.name} cuesta ${formatLempiras(property.cost)} y cobra renta de ${formatLempiras(property.rent)}. Tu saldo: ${formatLempiras(money)}.`,
+    options: [
+      {
+        label: `Comprar por ${formatLempiras(property.cost)}`,
+        onClick: () => {
+          socket.emit('propertyDecision', { action: 'buy' });
+          completeDecision();
+        }
+      },
+      {
+        label: 'Pasar sin comprar',
+        onClick: () => {
+          socket.emit('propertyDecision', { action: 'pass' });
+          completeDecision();
+        }
+      }
+    ]
+  });
+});
+
+socket.on('actionFeedback', (message) => {
+  activeDecision = null;
+  renderModalCard({
+    title: 'Banco',
+    text: message,
+    options: [{ label: 'Entendido', onClick: completeDecision }]
+  });
+});
+
+socket.on('eliminated', ({ reason }) => {
+  completeDecision();
+  renderModalCard({
+    title: 'Quedaste fuera',
+    text: `${reason} Tu saldo llego a cero.`,
+    options: [{ label: 'Ver resultado', onClick: completeDecision }]
   });
 });
 
@@ -352,6 +421,65 @@ function renderPlayers(state) {
     `;
     playersList.appendChild(card);
   });
+}
+
+function renderPortfolio(state) {
+  const player = state.players.find((candidate) => candidate.id === playerId);
+  portfolio.innerHTML = '<h2>Mis lugares</h2>';
+  if (!player) {
+    portfolio.innerHTML += '<div class="empty">Ya no participás en esta partida.</div>';
+    return;
+  }
+
+  const properties = state.board.filter((space) => space.owner === playerId);
+  if (!properties.length) {
+    portfolio.innerHTML += '<div class="empty">Todavía no tenés propiedades.</div>';
+    return;
+  }
+
+  properties.forEach((space) => {
+    const item = document.createElement('div');
+    item.className = `portfolio-item${space.mortgaged ? ' mortgaged' : ''}`;
+    item.innerHTML = `
+      <div>
+        <strong>${escapeHtml(space.name)}</strong>
+        <span>${space.mortgaged ? 'Hipotecada: sin renta' : `Renta ${formatLempiras(space.rent)}`}</span>
+      </div>
+    `;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.disabled = !state.gameStarted;
+    button.textContent = space.mortgaged
+      ? `Recuperar ${formatLempiras(Math.ceil(space.cost * 0.55))}`
+      : `Hipotecar ${formatLempiras(Math.floor(space.cost / 2))}`;
+    button.addEventListener('click', () => {
+      socket.emit('mortgageProperty', { propertyName: space.name });
+    });
+    item.appendChild(button);
+    portfolio.appendChild(item);
+  });
+}
+
+function animateMovement(pid, roll, fromPosition, toPosition) {
+  if (!latestState || !Number.isInteger(fromPosition) || !Number.isInteger(toPosition)) return;
+  const animatedState = JSON.parse(JSON.stringify(latestState));
+  const player = animatedState.players.find((candidate) => candidate.id === pid);
+  if (!player) return;
+  if (movementAnimation) clearTimeout(movementAnimation);
+  player.position = fromPosition;
+  let step = 0;
+  const move = () => {
+    step += 1;
+    player.position = (fromPosition + step) % animatedState.board.length;
+    renderBoard(animatedState);
+    if (step < roll) {
+      movementAnimation = setTimeout(move, 155);
+    } else {
+      movementAnimation = null;
+      if (latestState) renderBoard(latestState);
+    }
+  };
+  movementAnimation = setTimeout(move, 110);
 }
 
 function renderBoard(state) {
@@ -396,9 +524,10 @@ function renderBoard(state) {
     if (boardIdx !== -1 && boardIdx < state.board.length) {
       const space = state.board[boardIdx];
       const owner = state.players.find((p) => p.id === space.owner);
+      if (space.mortgaged) cell.classList.add('mortgaged');
       cell.innerHTML = `
         <div class="title">${boardIdx}. ${escapeHtml(space.name)}</div>
-        ${space.type === 'property' ? `<div class="space-price">${formatLempiras(space.cost)}</div><div class="space-rent">Renta ${formatLempiras(space.rent)}</div><div class="space-owner">${escapeHtml(owner?.name || 'Disponible')}</div>` : `<div class="space-event">${space.eventType === 'chisme' ? 'Chisme' : space.eventType === 'tragedia' ? 'Tragedia' : escapeHtml(space.name)}</div>`}
+        ${space.type === 'property' ? `<div class="space-price">${formatLempiras(space.cost)}</div><div class="space-rent">${space.mortgaged ? 'HIPOTECADA' : `Renta ${formatLempiras(space.rent)}`}</div><div class="space-owner">${escapeHtml(owner?.name || 'Disponible')}</div>` : `<div class="space-event">${space.eventType === 'chisme' ? 'Chisme' : space.eventType === 'tragedia' ? 'Tragedia' : escapeHtml(space.name)}</div>`}
       `;
 
       if (space.color) {

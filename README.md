@@ -5,7 +5,7 @@ Juego de tablero multijugador hondureño en tiempo real inspirado en San Pedro S
 ## Aviso De Uso
 
 - Proyecto educativo, gratuito y sin fines comerciales.
-- No contiene compras, pagos ni monetizacion.
+- No contiene compras reales, pagos ni monetizacion.
 - `Catrachópolis` es una identidad original e independiente del proyecto.
 - No esta afiliado, patrocinado ni respaldado por marcas comerciales de juegos de mesa.
 - La intencion educativa/no comercial no sustituye una revision legal si el proyecto se distribuye ampliamente.
@@ -37,6 +37,17 @@ HOST=0.0.0.0
 ```
 
 La ruta `GET /health` responde el estado basico usado por el hosting.
+
+## Dinamica De La Partida
+
+- Al caer en un lugar disponible, el jugador decide si comprarlo o pasar.
+- Los lugares comprados aparecen en **Mis lugares** y pueden hipotecarse para recuperar fondos.
+- Una propiedad hipotecada no cobra renta hasta pagar su recuperacion.
+- Al pasar por Salida se reciben 200 Lps. ficticios.
+- El presidio hace perder un turno.
+- Las tragedias se muestran solamente al jugador afectado; la mesa recibe el resultado.
+- Incluye 20 cartas de tragedia y 20 cartas de chisme originales elegidas al azar.
+- Si un jugador queda con `L 0`, pierde sus lugares y sale de la partida.
 
 ## Publicar En Render
 
